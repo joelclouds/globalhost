@@ -1,0 +1,7 @@
+# Build & Publish Tools
+build
+twine
+
+# Example Frameworks (Not required for the core package)
+fastapi
+django
