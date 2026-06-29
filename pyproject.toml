@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "globalhost"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     { name = "Joel Opoku", email = "joelclouds@gmail.com" }
 ]
@@ -16,12 +16,21 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = [
-    "uvicorn>=0.22.0",
-]
+
+# Zero runtime dependencies! The core package uses only the Python standard library.
+dependencies = []
 
 [project.urls]
 "Homepage" = "https://github.com/joelclouds/globalhost"
+
+# Optional dependencies for specific frameworks
+[project.optional-dependencies]
+fastapi = ["fastapi", "uvicorn"]
+django = ["django"]
+flask = ["flask"]
+streamlit = ["streamlit"]
+# Users can install everything at once with: pip install globalhost[all]
+all = ["fastapi", "uvicorn", "django", "flask", "streamlit"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

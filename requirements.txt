@@ -2,6 +2,9 @@
 build
 twine
 
-# Example Frameworks (Not required for the core package)
+# Example Frameworks (For local testing)
 fastapi
+uvicorn
 django
+flask
+streamlit

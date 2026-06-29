@@ -1,23 +1,25 @@
 import time
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from flask import Flask
 from globalhost import GlobalHostApp
 
-app = FastAPI()
+app = Flask(__name__)
 
-@app.get("/", response_class=HTMLResponse)
+@app.route("/")
 def root():
     return """
     <html>
-        <head><title>GlobalHost FastAPI</title></head>
-        <body><h1>Hello from FastAPI!</h1><p>Served via Cloudflare Tunnel.</p></body>
+        <head><title>GlobalHost Flask</title></head>
+        <body>
+            <h1>Hello from Flask!</h1>
+            <p>Served via Cloudflare Tunnel.</p>
+        </body>
     </html>
     """
 
 if __name__ == "__main__":
     host = GlobalHostApp()
-    if host.bg_launch("fastapi", "02_webpage:app", port=8001):
-        print(f"\nFastAPI Webpage is live!")
+    if host.bg_launch("flask", __file__, port=8005):
+        print(f"\nFlask Webpage is live!")
         print(f"Public URL: {host.get_url()}")
         print("Press Ctrl+C to shut down.\n")
         try:
