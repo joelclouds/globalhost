@@ -64,12 +64,23 @@ class TunnelManager:
 
         return binary_path
 
-    def start(self, port: int) -> str:
+    def start(self, port: int, token: str | None = None) -> str:
         binary = self._ensure_binary_exists()
-        logger.info(f"Establishing tunnel to port {port}...")
+
+        if token:
+            # SMART PARSING: If user pasted the whole command, grab the last word (the token).
+            token = token.strip().split()[-1]
+
+            logger.info("Establishing Named Tunnel to your Cloudflare domain...")
+            cmd = [binary, "tunnel", "--no-autoupdate", "run", "--token", token]
+            success_indicator = "Registered" # cloudflared logs "Registered tunnel connection"
+        else:
+            logger.info(f"Establishing Quick Tunnel to port {port}...")
+            cmd = [binary, "tunnel", "--url", f"http://localhost:{port}"]
+            success_indicator = ".trycloudflare.com"
 
         self.process = subprocess.Popen(
-            [binary, "tunnel", "--url", f"http://localhost:{port}"],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -78,28 +89,44 @@ class TunnelManager:
         )
 
         start_time = time.time()
-        # Increased timeout slightly to give Cloudflare time to reject bad requests
-        while time.time() - start_time < 15: 
+        while time.time() - start_time < 15:
             line = self.process.stdout.readline()
             if not line:
-                break
+                if self.process.poll() is not None:
+                    break
+                continue
 
-            # Catch Cloudflare Rate Limiting explicitly
+            # Catch Cloudflare API Errors (Rate limits or invalid tokens)
             if "1015" in line or "429" in line:
                 self.stop()
-                raise RuntimeError("Cloudflare rate limit exceeded (Error 1015). You created too many tunnels recently. Please wait a few minutes or change networks.")
+                if token:
+                    raise RuntimeError(f"Cloudflare API rejected the Named Tunnel (Error 1015/429). Your account might be rate-limited or the token is invalid. Raw log: {line.strip()}")
+                else:
+                    raise RuntimeError("Cloudflare rate limit exceeded (Error 1015). You created too many Quick Tunnels recently.")
 
-            if ".trycloudflare.com" in line:
-                for word in line.split():
-                    if "trycloudflare.com" in word:
-                        url = word.strip()
-                        self.public_url = url if url.startswith("https://") else f"https://{url}"
-                        break
+            # Catch Invalid Token errors (Named Tunnels)
+            if token and ("ERR" in line and ("token" in line.lower() or "register" in line.lower())):
+                self.stop()
+                raise RuntimeError(f"Cloudflare rejected the token. Details: {line.strip()}")
+
+            if success_indicator in line:
+                if token:
+                    # For named tunnels, the URL is the user's custom domain.
+                    self.public_url = "https://<your-configured-domain>"
+                else:
+                    for word in line.split():
+                        if "trycloudflare.com" in word:
+                            url = word.strip()
+                            self.public_url = url if url.startswith("https://") else f"https://{url}"
+                            break
                 break
 
         if not self.public_url:
             self.stop()
-            raise RuntimeError("Failed to acquire public URL. Tunnel initialization timed out.")
+            if token:
+                raise RuntimeError("Failed to connect Named Tunnel. Check your token and Cloudflare dashboard.")
+            else:
+                raise RuntimeError("Failed to acquire public URL. Tunnel initialization timed out.")
 
         return self.public_url
 
@@ -107,7 +134,6 @@ class TunnelManager:
         if self.process:
             logger.debug("Closing tunnel.")
             try:
-                # Kill the entire process group (cloudflared + any child processes)
                 os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
                 pass

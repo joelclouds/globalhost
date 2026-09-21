@@ -57,7 +57,7 @@ if __name__ == "__main__":
             host.stop()
 ```
 
-### 3. Programmatic Usage (Advanced)
+### 3. Programmatic Usage (Slighty Advanced)
 
 Need to inject the live public URL into a database, webhook, or frontend config at runtime? Use the programmatic API:
 
@@ -84,6 +84,54 @@ if host.bg_launch(framework="fastapi", app="main:app", port=9000):
     except KeyboardInterrupt:
         host.stop()
 ```
+
+---
+
+### 4. Advanced: Using Your Own Domain (Named Tunnels)
+
+By default, GlobalHost uses temporary Quick Tunnels (`.trycloudflare.com`). For a permanent, custom domain, you can use Cloudflare Named Tunnels (100% free).
+
+**Step 1: Get your Tunnel Token and ID**
+1. In your Cloudflare Zero Trust Dashboard, go to **Networks** > **Tunnels**.
+2. Note your **Tunnel ID** (a UUID like `a1b2c3d4-1234-5678-90ab-cdef12345678`).
+3. Click **Configure** on your tunnel. Under "Install and run a connector", copy the **entire manual command** (e.g., `cloudflared tunnel run --token eyJh...`).
+
+**Step 2: Point your Domain's DNS to the Tunnel**
+1. Go to the main Cloudflare Dashboard and select your domain.
+2. Navigate to **DNS** > **Records** and click **Add record**.
+3. Create a `CNAME` record:
+   - **Type**: `CNAME`
+   - **Name**: `api` (or your desired subdomain, e.g., `gamebot`)
+   - **Target**: `<YOUR_TUNNEL_ID>.cfargotunnel.com` (replace with your actual Tunnel ID)
+   - **Proxy status**: **Proxied** (Orange cloud icon)
+4. Click **Save**.
+
+**Step 3: Launch GlobalHost with the Token**
+Pass the command or token to GlobalHost. It will automatically extract the token for you.
+```python
+import os
+from globalhost import GlobalHostApp
+
+host = GlobalHostApp()
+# Paste the entire command from Cloudflare, or just the 'eyJ...' token
+token = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "cloudflared tunnel run --token YOUR_TOKEN")
+
+host.bg_launch("fastapi", "main:app", port=8000, token=token)
+```
+
+**Step 4: Configure the Route (Fixes 502 Bad Gateway)**
+The tunnel is now connected, but you must tell Cloudflare which local port to send the traffic to.
+1. In the Cloudflare Zero Trust Dashboard, go to **Networks** > **Tunnels**.
+2. Click your tunnel's name, then click the **Routes** tab.
+3. Click **Add a public hostname** (or "Add a route").
+4. Fill it out:
+   - **Subdomain**: `api` (must match the DNS record Name from Step 2)
+   - **Domain**: `yourdomain.com`
+   - **Service**: `HTTP`
+   - **URL**: `localhost:8000` (must match your app's port)
+5. Click **Save**. 
+
+Your custom domain is now permanently live and routing to your local machine!
 
 ---
 
