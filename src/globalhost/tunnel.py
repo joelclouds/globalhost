@@ -7,6 +7,8 @@ import urllib.request
 import tarfile
 import signal
 import logging
+import base64
+import json
 
 logger = logging.getLogger("globalhost.tunnel")
 
@@ -16,6 +18,21 @@ class TunnelManager:
         self.machine = platform.machine().lower()
         self.process = None
         self.public_url = None
+
+    def _is_termux(self) -> bool:
+        return os.path.exists("/data/data/com.termux")
+
+    def _get_tunnel_id_from_token(self, token: str) -> str | None:
+        try:
+            if '.' in token:
+                payload = token.split('.')[1]
+            else:
+                payload = token
+            padding = '=' * (4 - len(payload) % 4)
+            decoded_bytes = base64.urlsafe_b64decode(payload + padding)
+            return json.loads(decoded_bytes).get('tun') or json.loads(decoded_bytes).get('t')
+        except Exception:
+            return None
 
     def _get_binary_config(self):
         base_url = "https://github.com/cloudflare/cloudflared/releases/latest/download/"
@@ -32,6 +49,12 @@ class TunnelManager:
             raise RuntimeError(f"Unsupported operating system: {self.system}")
 
     def _ensure_binary_exists(self) -> str:
+        if self._is_termux():
+            if subprocess.run(["which", "cloudflared"], capture_output=True).returncode != 0:
+                logger.info("Installing cloudflared via pkg...")
+                subprocess.run(["pkg", "install", "cloudflared", "-y"], check=True)
+            return "cloudflared"
+
         base_dir = os.path.dirname(__file__)
         bin_dir = os.path.join(base_dir, "bin")
         os.makedirs(bin_dir, exist_ok=True)
@@ -44,16 +67,13 @@ class TunnelManager:
 
         if not os.path.exists(binary_path):
             logger.info("cloudflared binary not found. Downloading...")
-            logger.debug(f"Downloading from URL: {download_url}")
             try:
                 temp_download = os.path.join(bin_dir, filename)
                 urllib.request.urlretrieve(download_url, temp_download)
-
                 if filename.endswith(".tgz"):
                     with tarfile.open(temp_download, "r:gz") as tar:
                         tar.extractall(path=bin_dir)
                     os.remove(temp_download)
-
                 logger.info("Download complete.")
             except Exception as e:
                 logger.error(f"Failed to download cloudflared binary: {e}")
@@ -67,13 +87,17 @@ class TunnelManager:
     def start(self, port: int, token: str | None = None) -> str:
         binary = self._ensure_binary_exists()
 
-        if token:
-            # SMART PARSING: If user pasted the whole command, grab the last word (the token).
-            token = token.strip().split()[-1]
+        if self._is_termux():
+            logger.info("Acquiring Termux wake lock to prevent Android sleep...")
+            subprocess.run(["termux-wake-lock"], check=False)
 
-            logger.info("Establishing Named Tunnel to your Cloudflare domain...")
+        if token:
+            token = token.strip().split()[-1]
+            tunnel_id = self._get_tunnel_id_from_token(token)
+            self.public_url = f"https://{tunnel_id}.cfargotunnel.com" if tunnel_id else "https://<your-tunnel-id>.cfargotunnel.com"
+            logger.info("Establishing Named Tunnel connection...")
             cmd = [binary, "tunnel", "--no-autoupdate", "run", "--token", token]
-            success_indicator = "Registered" # cloudflared logs "Registered tunnel connection"
+            success_indicator = "Registered"
         else:
             logger.info(f"Establishing Quick Tunnel to port {port}...")
             cmd = [binary, "tunnel", "--url", f"http://localhost:{port}"]
@@ -96,24 +120,23 @@ class TunnelManager:
                     break
                 continue
 
-            # Catch Cloudflare API Errors (Rate limits or invalid tokens)
             if "1015" in line or "429" in line:
                 self.stop()
                 if token:
-                    raise RuntimeError(f"Cloudflare API rejected the Named Tunnel (Error 1015/429). Your account might be rate-limited or the token is invalid. Raw log: {line.strip()}")
+                    raise RuntimeError(f"Cloudflare API rejected the Named Tunnel (Error 1015/429). Raw log: {line.strip()}")
                 else:
-                    raise RuntimeError("Cloudflare rate limit exceeded (Error 1015). You created too many Quick Tunnels recently.")
+                    raise RuntimeError("Cloudflare rate limit exceeded (Error 1015).")
 
-            # Catch Invalid Token errors (Named Tunnels)
             if token and ("ERR" in line and ("token" in line.lower() or "register" in line.lower())):
                 self.stop()
                 raise RuntimeError(f"Cloudflare rejected the token. Details: {line.strip()}")
 
             if success_indicator in line:
                 if token:
-                    # For named tunnels, the URL is the user's custom domain.
-                    self.public_url = "https://<your-configured-domain>"
+                    # Named tunnel URL was already set above
+                    pass
                 else:
+                    # Extract Quick Tunnel URL
                     for word in line.split():
                         if "trycloudflare.com" in word:
                             url = word.strip()
@@ -123,10 +146,7 @@ class TunnelManager:
 
         if not self.public_url:
             self.stop()
-            if token:
-                raise RuntimeError("Failed to connect Named Tunnel. Check your token and Cloudflare dashboard.")
-            else:
-                raise RuntimeError("Failed to acquire public URL. Tunnel initialization timed out.")
+            raise RuntimeError("Failed to connect tunnel. Check your token and Cloudflare dashboard.")
 
         return self.public_url
 

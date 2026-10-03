@@ -135,6 +135,32 @@ Your custom domain is now permanently live and routing to your local machine!
 
 ---
 
+### 5. Running on Android (Termux)
+
+GlobalHost fully supports running as a 24/7 tunnel endpoint on Android devices via Termux. 
+
+**Setup:**
+1. Install Termux from [F-Droid](https://f-droid.org/en/packages/com.termux/) (the Play Store version is outdated).
+2. Install dependencies:
+   ```bash
+   pkg update && pkg install python cloudflared
+   ```
+3. Install GlobalHost:
+   ```bash
+   pip install globalhost
+   ```
+
+**Running 24/7:**
+GlobalHost will automatically detect Termux, install missing dependencies, and acquire a wake lock to prevent Android from killing the process. 
+
+To keep your Python script running in the background even when you close Termux, launch it with `nohup`:
+```bash
+nohup python main.py > globalhost.log 2>&1 &
+```
+*(To stop it later, find the process with `ps aux | grep python` and kill it).*
+
+---
+
 ## How It Works Under the Hood
 
 1. **OS Detection:** On execution, the module identifies the hosting machine's operating system and architecture.
